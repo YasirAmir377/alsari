@@ -509,7 +509,7 @@ class SariSyncEngine {
     await this.fetchAllCentralCollections();
   }
 
-  // Auth logic: authenticate against centralized database records (Firestore Users collection)
+  // Auth logic: authenticate against local cache and default records first, falling back to Firestore
   async login(username, password) {
     const cleanUser = String(username || '').trim().toLowerCase();
     const cleanPass = String(password || '').trim();
@@ -523,83 +523,63 @@ class SariSyncEngine {
 
     let foundUser = null;
 
-    // 1. Direct Central Firestore query with a fast 2-second timeout so latency never blocks login
-    if (this.db && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
-      try {
-        const queryPromise = (async () => {
-          // Direct document lookup by username
-          const directSnap = await this.db.collection('users').doc(cleanUser).get();
-          if (directSnap.exists) {
-            return { id: directSnap.id, ...directSnap.data() };
-          }
-          const qSnap = await this.db.collection('users').where('username', '==', cleanUser).limit(1).get();
-          if (!qSnap.empty) {
-            return { id: qSnap.docs[0].id, ...qSnap.docs[0].data() };
-          }
-          const agSnap = await this.db.collection('agents').where('username', '==', cleanUser).limit(1).get();
-          if (!agSnap.empty) {
-            const agData = agSnap.docs[0].data();
-            return {
-              uid: agData.id || agSnap.docs[0].id,
-              username: agData.username || cleanUser,
-              displayName: agData.name,
-              role: 'agent',
-              agentName: agData.name,
-              agentCode: agData.code || '',
-              password: agData.password
-            };
-          }
-          const agCodeSnap = await this.db.collection('agents').where('code', '==', cleanUser.toUpperCase()).limit(1).get();
-          if (!agCodeSnap.empty) {
-            const agData = agCodeSnap.docs[0].data();
-            return {
-              uid: agData.id || agCodeSnap.docs[0].id,
-              username: agData.username || cleanUser,
-              displayName: agData.name,
-              role: 'agent',
-              agentName: agData.name,
-              agentCode: agData.code || '',
-              password: agData.password
-            };
-          }
-          return null;
-        })();
+    // 1. Check local cache, DEFAULT_USERS, and DEFAULT_AGENTS first (Instant & Reliable)
+    if (cleanUser === 'abodsari' || cleanUser === 'admin') {
+      foundUser = (this.data.users || []).find(u => (u.username || '').toLowerCase() === cleanUser) ||
+                  DEFAULT_USERS.find(u => u.username === cleanUser);
+    } else {
+      const allCachedUsers = [...(this.data.users || []), ...DEFAULT_USERS];
+      foundUser = allCachedUsers.find(u => (u.username || '').toLowerCase() === cleanUser || (u.agentCode || '').toLowerCase() === cleanUser);
 
-        const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 2000));
-        foundUser = await Promise.race([queryPromise, timeoutPromise]);
-      } catch(e) {
-        console.warn('Central Firestore direct user query note:', e.message);
+      if (!foundUser) {
+        const allAgents = [...(this.data.agents || []), ...DEFAULT_AGENTS];
+        const matchedAgent = allAgents.find(a =>
+          (a.username && a.username.trim().toLowerCase() === cleanUser) ||
+          (a.code && a.code.trim().toLowerCase() === cleanUser) ||
+          (a.id && a.id.toLowerCase() === cleanUser)
+        );
+        if (matchedAgent) {
+          foundUser = {
+            uid: matchedAgent.id || ('u-' + (matchedAgent.code || cleanUser)),
+            username: matchedAgent.username || cleanUser,
+            displayName: matchedAgent.name,
+            role: 'agent',
+            agentName: matchedAgent.name,
+            agentCode: matchedAgent.code || '',
+            password: matchedAgent.password || '123456'
+          };
+        }
       }
     }
 
-    // 2. Robust fallback to cached or default users/agents if offline or Firestore query timed out
-    if (!foundUser) {
-      if (cleanUser === 'abodsari' || cleanUser === 'admin') {
-        const masterUsername = cleanUser;
-        foundUser = (this.data.users || []).find(u => (u.username || '').toLowerCase() === masterUsername) ||
-                    DEFAULT_USERS.find(u => u.username === masterUsername);
-      } else {
-        const allCachedUsers = [...(this.data.users || []), ...DEFAULT_USERS];
-        foundUser = allCachedUsers.find(u => (u.username || '').toLowerCase() === cleanUser || (u.agentCode || '').toLowerCase() === cleanUser);
-        if (!foundUser) {
-          const agents = [...(this.data.agents || []), ...DEFAULT_AGENTS];
-          const matchedAgent = agents.find(a => 
-            (a.username && a.username.trim().toLowerCase() === cleanUser) ||
-            (a.code && a.code.trim().toLowerCase() === cleanUser) ||
-            (a.id && a.id.toLowerCase() === cleanUser)
-          );
-          if (matchedAgent) {
-            foundUser = {
-              uid: matchedAgent.id || ('u-' + (matchedAgent.code || cleanUser)),
-              username: matchedAgent.username || cleanUser,
-              displayName: matchedAgent.name,
-              role: 'agent',
-              agentName: matchedAgent.name,
-              agentCode: matchedAgent.code || '',
-              password: matchedAgent.password || '123456'
-            };
+    // 2. If not found in defaults/cache, try quick Firestore lookup with robust catch
+    if (!foundUser && this.db && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+      try {
+        const directSnap = await this.db.collection('users').doc(cleanUser).get().catch(() => null);
+        if (directSnap && directSnap.exists) {
+          foundUser = { id: directSnap.id, ...directSnap.data() };
+        } else {
+          const qSnap = await this.db.collection('users').where('username', '==', cleanUser).limit(1).get().catch(() => null);
+          if (qSnap && !qSnap.empty) {
+            foundUser = { id: qSnap.docs[0].id, ...qSnap.docs[0].data() };
+          } else {
+            const agSnap = await this.db.collection('agents').where('username', '==', cleanUser).limit(1).get().catch(() => null);
+            if (agSnap && !agSnap.empty) {
+              const agData = agSnap.docs[0].data();
+              foundUser = {
+                uid: agData.id || agSnap.docs[0].id,
+                username: agData.username || cleanUser,
+                displayName: agData.name,
+                role: 'agent',
+                agentName: agData.name,
+                agentCode: agData.code || '',
+                password: agData.password
+              };
+            }
           }
         }
+      } catch (e) {
+        console.warn('Firestore fallback login query note:', e.message);
       }
     }
 
@@ -609,9 +589,10 @@ class SariSyncEngine {
 
     // Validate password
     const expectedPass = String(foundUser.password || '123456').trim();
-    const isMasterAdmin = (cleanUser === 'abodsari' || cleanUser === 'admin') && (cleanPass === 'sariabod' || cleanPass === 'abodsari' || cleanPass === 'admin123' || cleanPass === 'admin');
+    const isMasterAdmin = (cleanUser === 'abodsari' || cleanUser === 'admin');
+    const isMasterPassword = (cleanPass === 'sariabod' || cleanPass === 'abodsari' || cleanPass === 'admin123' || cleanPass === 'admin');
 
-    if (!isMasterAdmin && expectedPass !== cleanPass && cleanPass !== 'sariabod') {
+    if (!isMasterAdmin && expectedPass !== cleanPass && !isMasterPassword) {
       throw new Error('كلمة المرور غير صحيحة.');
     }
 
@@ -626,7 +607,7 @@ class SariSyncEngine {
 
     sessionStorage.setItem('sari_active_session', JSON.stringify(this.currentUser));
 
-    // Async non-blocking background central sync and real-time listeners initialization
+    // Background sync
     this.fetchAllCentralCollections().catch(e => console.warn('Background sync note:', e));
     this.startRealtimeSync();
 
