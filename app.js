@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Main Application Logic
  * Al-Sari Terrestrial Broadcast Management System
  * الساري للبث الأرضي
@@ -1185,9 +1185,7 @@
           { collectionName: 'agentSubmissions', items: updatedSubs }
         ]);
         
-        if (typeof getEngine().deleteItem === 'function') {
-          await getEngine().deleteItem('agentSubmissions', req.id);
-        }
+        if (typeof getEngine().deleteFirestoreSubmission === 'function') { await getEngine().deleteFirestoreSubmission(req.submittedBy, req.id); } else if (typeof getEngine().deleteItem === 'function') { await getEngine().deleteItem('agentSubmissions', req.id); }
 
         showToast(`تم قبول الطلب بنجاح وإضافته لقائمة المشتركين والزبائن للوكيل (${agentName})`, 'success');
         navigateTo(currentPage);
@@ -1203,7 +1201,7 @@
       const data = getData();
       const subs = data.agentSubmissions || [];
       const req = subs.find(s => s.id === subId);
-      if (req && req.submittedBy && typeof getEngine().deleteFirestoreSubmission === 'function') {
+      if (req && typeof getEngine().deleteFirestoreSubmission === 'function') {
         await getEngine().deleteFirestoreSubmission(req.submittedBy, req.id);
       }
       const updated = subs.filter(s => s.id !== subId);
@@ -1756,3 +1754,5 @@
   }
 
 })();
+
+

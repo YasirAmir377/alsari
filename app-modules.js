@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Application Modules: Agents, Debts, Subscribers, Barcodes, Reports, Pricing, Users, Agent Dashboard
  * Al-Sari Terrestrial Broadcast Management System
  */
@@ -266,7 +266,7 @@
         if (data.agentSubmissions) {
           const submissionsToDelete = data.agentSubmissions.filter(sub => sub.seller === agentName || sub.agentName === agentName || (agentUsername && sub.seller === agentUsername));
           for (const sub of submissionsToDelete) {
-            await getEngine().deleteItem('agentSubmissions', sub.id);
+            if (typeof getEngine().deleteFirestoreSubmission === 'function') { await getEngine().deleteFirestoreSubmission(sub.submittedBy, sub.id); } else { await getEngine().deleteItem('agentSubmissions', sub.id); }
           }
         }
       }
@@ -880,3 +880,4 @@
   };
 
 })();
+
