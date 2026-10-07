@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Firebase 12 Compat Sync & Local Persistence Engine
  * Al-Sari Terrestrial Broadcast Management System
  * LocalStorage key: "sari-app-v1"
@@ -784,13 +784,12 @@ class SariSyncEngine {
     const isAdmin = user.role === 'admin' || user.role === 'أدمن' || user.role === 'مدير رئيسي';
 
     // Core central collections for full two-way synchronization
-    const sharedCollections = ['subscribers', 'sales', 'debts', 'agents', 'users', 'pricing', 'templates', 'agentSubmissions', 'codes', 'agentSettlements', 'products'];
+    const sharedCollections = ['subscribers', 'sales', 'debts', 'agents', 'users', 'pricing', 'templates', 'codes', 'agentSettlements', 'products'];
 
     sharedCollections.forEach(col => {
       try {
         const unsub = this.db.collection(col).onSnapshot(snap => {
-          if (!snap.empty) {
-            const remoteRecords = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const remoteRecords = snap.empty ? [] : snap.docs.map(d => ({ id: d.id, ...d.data() })); if (true) {
             if (col === 'pricing') {
               const defaultDoc = remoteRecords.find(d => d.id === 'default') || remoteRecords[0];
               this.data.pricing = defaultDoc;
@@ -858,18 +857,7 @@ class SariSyncEngine {
     // Submissions sync
     try {
       const subUnsub = this.db.collection('agentSubmissions').onSnapshot(snap => {
-        if (!snap.empty) {
-          const subs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          if (this.currentUser && !isAdmin) {
-            const agentUid = this.currentUser.uid;
-            const agentName = this.currentUser.agentName || this.currentUser.displayName;
-            this.data.agentSubmissions = subs.filter(s => s.submittedBy === agentUid || s.seller === agentName || s.agentName === agentName);
-          } else {
-            this.data.agentSubmissions = subs;
-          }
-          this.saveLocal();
-          window.dispatchEvent(new CustomEvent('sari:data-updated', { detail: { collection: 'agentSubmissions' } }));
-        }
+        const subs = snap.empty ? [] : snap.docs.map(d => ({ id: d.id, ...d.data() })); if (this.currentUser && !isAdmin) { const agentUid = this.currentUser.uid; const agentName = this.currentUser.agentName || this.currentUser.displayName; this.data.agentSubmissions = subs.filter(s => s.submittedBy === agentUid || s.seller === agentName || s.agentName === agentName); } else { this.data.agentSubmissions = subs; } this.saveLocal(); window.dispatchEvent(new CustomEvent('sari:data-updated', { detail: { collection: 'agentSubmissions' } }));
       }, err => console.warn('Submissions listener err:', err));
       this.unsubscribers.push(subUnsub);
     } catch (e) {}
@@ -996,9 +984,7 @@ class SariSyncEngine {
   }
 
   // Delete a single item from local and Firestore with strict sync check
-  async deleteItem(collectionName, itemId) {
-    if (!itemId) return;
-    // Strict immediate update of local in-memory state and localStorage
+  async deleteItem(collectionName, itemId) { if (!itemId) return; if (collectionName === 'sales' && this.db) { try { const debtsRef = this.db.collection('debts'); const snap = await debtsRef.where('saleId', '==', itemId).get(); snap.forEach(d => this.deleteItem('debts', d.id)); } catch(e) {} } // Strict immediate update of local in-memory state and localStorage
     this.data[collectionName] = (this.data[collectionName] || []).filter(item => {
       if (collectionName === 'users') {
         return item.uid !== itemId && item.username !== itemId;
@@ -1085,3 +1071,8 @@ window.resolveAgentName = function(record) {
 };
 
 window.syncEngine = new SariSyncEngine();
+
+
+
+
+
