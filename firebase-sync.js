@@ -279,12 +279,9 @@ class SariSyncEngine {
         if (!finalUsers.some(u => u.username === 'abodsari')) finalUsers.unshift(DEFAULT_USERS[0]);
         if (!finalUsers.some(u => u.username === 'admin')) finalUsers.unshift(DEFAULT_USERS[1]);
 
-        const validAgentNames = finalAgents.map(a => a.name);
         const rawSales = Array.isArray(parsed.sales) ? parsed.sales : [];
-        const cleanedSales = rawSales.filter(s => !s.seller || s.seller === 'المركز الرئيسي' || validAgentNames.includes(s.seller));
-
         const rawDebts = Array.isArray(parsed.debts) ? parsed.debts : [];
-        const cleanedDebts = rawDebts.filter(d => !d.seller || d.seller === 'المركز الرئيسي' || validAgentNames.includes(d.seller));
+        const rawSubmissions = Array.isArray(parsed.agentSubmissions) ? parsed.agentSubmissions : [];
 
         const pricing = parsed.pricing || DEFAULT_PRICING;
         if (pricing.agentPrices) {
@@ -299,15 +296,15 @@ class SariSyncEngine {
 
         return {
           agents: finalAgents,
-          sales: cleanedSales,
-          debts: cleanedDebts,
+          sales: rawSales,
+          debts: rawDebts,
           codes: Array.isArray(parsed.codes) ? parsed.codes : DEFAULT_BARCODES,
           subscribers: Array.isArray(parsed.subscribers) ? parsed.subscribers : DEFAULT_SUBSCRIBERS,
           pricing: pricing,
           templates: parsed.templates || { id: 'main-templates', whatsapp: DEFAULT_WHATSAPP_TEMPLATE },
           users: finalUsers,
           agentSettlements: [],
-          agentSubmissions: Array.isArray(parsed.agentSubmissions) ? parsed.agentSubmissions.filter(sub => validAgentNames.includes(sub.seller) || validAgentNames.includes(sub.agentName)) : [],
+          agentSubmissions: rawSubmissions,
           products: Array.isArray(parsed.products) && parsed.products.length > 0 ? parsed.products : DEFAULT_PRODUCTS
         };
       }
@@ -875,7 +872,7 @@ class SariSyncEngine {
     if (!this.db || !window.isFirebaseConfigured()) return;
     try {
       const itemsList = Array.isArray(items) ? items : [items];
-      const batchSize = 400;
+      const batchSize = 100;
       for (let i = 0; i < itemsList.length; i += batchSize) {
         const batch = this.db.batch();
         const chunk = itemsList.slice(i, i + batchSize);
@@ -958,29 +955,7 @@ class SariSyncEngine {
     this.saveLocal();
     window.dispatchEvent(new CustomEvent('sari:data-updated', { detail: { collection: 'all' } }));
 
-    if (this.db && window.isFirebaseConfigured()) {
-      try {
-        const batch = this.db.batch();
-        for (const update of updates) {
-          const itemsList = Array.isArray(update.items) ? update.items : [update.items];
-          itemsList.forEach(item => {
-            let docId = item.id || 'doc-' + Math.random().toString(36).substring(2, 9);
-            const normalizedItem = { ...item, id: docId };
-            
-            // Top-level collection write
-            const topRef = this.db.collection(update.collectionName).doc(docId);
-            batch.set(topRef, normalizedItem, { merge: true });
-            
-            // Mirror to appData records
-            const docRef = this.db.collection('appData').doc(update.collectionName).collection('records').doc(docId);
-            batch.set(docRef, normalizedItem, { merge: true });
-          });
-        }
-        await batch.commit();
-      } catch (err) {
-        console.warn('Batch commit to Firestore failed:', err);
-      }
-    }
+    if (this.db && window.isFirebaseConfigured()) { try { for (const update of updates) { await this.pushToFirestore(update.collectionName, update.items); } } catch (err) { console.warn('Batch commit to Firestore failed:', err); } }
   }
 
   // Delete a single item from local and Firestore with strict sync check
@@ -1028,7 +1003,7 @@ class SariSyncEngine {
         // Clear from top-level collection
         const snap = await this.db.collection(collectionName).get();
         if (!snap.empty) {
-          const batchSize = 400;
+          const batchSize = 100;
           for (let i = 0; i < snap.docs.length; i += batchSize) {
             const batch = this.db.batch();
             const chunk = snap.docs.slice(i, i + batchSize);
@@ -1039,7 +1014,7 @@ class SariSyncEngine {
         // Clear from appData records
         const snap2 = await this.db.collection('appData').doc(collectionName).collection('records').get();
         if (!snap2.empty) {
-          const batchSize = 400;
+          const batchSize = 100;
           for (let i = 0; i < snap2.docs.length; i += batchSize) {
             const batch = this.db.batch();
             const chunk = snap2.docs.slice(i, i + batchSize);
@@ -1071,6 +1046,8 @@ window.resolveAgentName = function(record) {
 };
 
 window.syncEngine = new SariSyncEngine();
+
+
 
 
 

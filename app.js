@@ -697,7 +697,7 @@
 
     // Filter calculations
     if (salesFilter.seller !== 'all') {
-      sales = sales.filter(s => s.seller === salesFilter.seller);
+      sales = sales.filter(s => s.seller === salesFilter.seller || s.agentName === salesFilter.seller || s.agentCode === salesFilter.seller || (window.resolveAgentName && window.resolveAgentName(s) === salesFilter.seller));
     }
     if (salesFilter.type !== 'all') {
       sales = sales.filter(s => {
@@ -986,13 +986,13 @@
                     </div>
 
                     <div class="pending-card-actions">
-                      <button type="button" class="btn btn-success btn-sm btn-pending-action" onclick="approveSubmission('${req.id}', 'نقد')" title="اعتماد كدفع نقدي">
+                      <button type="button" class="btn btn-success btn-sm btn-pending-action" onclick="approveSubmission('${req.id}', 'نقد', this)" title="اعتماد كدفع نقدي">
                         <span>✓</span> <span>قبول نقد</span>
                       </button>
-                      <button type="button" class="btn btn-secondary btn-sm btn-pending-action" onclick="approveSubmission('${req.id}', 'دين')" title="اعتماد كدين على الوكيل">
+                      <button type="button" class="btn btn-secondary btn-sm btn-pending-action" onclick="approveSubmission('${req.id}', 'دين', this)" title="اعتماد كدين على الوكيل">
                         <span>📝</span> <span>قبول دين</span>
                       </button>
-                      <button type="button" class="btn btn-danger btn-sm btn-pending-action" onclick="rejectSubmission('${req.id}')" title="رفض الطلب">
+                      <button type="button" class="btn btn-danger btn-sm btn-pending-action" onclick="openRejectModal('${req.id}')" title="رفض الطلب والتوجيه المالي">
                         <span>✕</span> <span>رفض</span>
                       </button>
                     </div>
@@ -1070,7 +1070,12 @@
     });
   };
 
-  window.approveSubmission = function(subId, paymentMethod) {
+  window.approveSubmission = function(subId, paymentMethod, btnEl) {
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = '<span>⏳</span> <span>جاري الاعتماد...</span>';
+    }
+
     const isCash = paymentMethod === 'نقد';
     const title = isCash ? 'قبول الطلب كنقد' : 'قبول الطلب كدين';
     const message = `هل أنت متأكد من قبول هذا الطلب وترحيله إلى المبيعات وإضافته لقائمة المشتركين والزبائن للوكيل ${isCash ? 'كنقد' : 'كدين'}؟`;
@@ -1080,7 +1085,10 @@
         const data = getData();
         const subs = data.agentSubmissions || [];
         const req = subs.find(s => s.id === subId);
-        if (!req) return;
+        if (!req) {
+          if (btnEl) btnEl.disabled = false;
+          return;
+        }
 
         const agentName = window.resolveAgentName ? window.resolveAgentName(req) : (req.agentName || req.seller || 'وكيل');
         const isNewDevice = req.saleType === 'جهاز جديد' || req.subscriptionType === 'جهاز جديد';
@@ -1097,6 +1105,12 @@
           }
         }
 
+        let salePrice = Number(req.price) || 0;
+        if (salePrice <= 0) {
+          const agPricing = window.getAgentPricing ? window.getAgentPricing(agentName) : {};
+          salePrice = isNewDevice ? (agPricing.device || 45000) : (agPricing.sub1 || 18000);
+        }
+
         // 1. Create completed sale
         const newSale = {
           id: 'sale-' + Date.now(),
@@ -1106,15 +1120,16 @@
           seller: agentName,
           agentName: agentName,
           agentCode: req.agentCode || '',
+          submittedBy: req.submittedBy || '',
           saleType: req.saleType || (isNewDevice ? 'جهاز جديد' : 'تجديد اشتراك'),
           deviceNumber: req.deviceNumber,
           subscriptionType: req.subscriptionType || (isNewDevice ? 'جهاز جديد' : 'اشتراك شهر واحد'),
           startDate: startDate,
           endDate: endDate,
-          price: Number(req.price) || 0,
+          price: salePrice,
           paymentStatus: isCash ? 'نقد' : 'دين',
           paymentMethod: isCash ? 'نقد' : 'دين',
-          agentPaid: isCash ? (Number(req.price) || 0) : 0,
+          agentPaid: isCash ? salePrice : 0,
           approvalStatus: 'معتمدة',
           approvedAt: new Date().toISOString(),
           createdAt: new Date().toISOString()
@@ -1136,11 +1151,12 @@
             seller: agentName,
             agentName: agentName,
             agentCode: req.agentCode || '',
+            submittedBy: req.submittedBy || '',
             customerPhone: req.customerPhone || '',
             deviceNumber: req.deviceNumber,
-            totalAmount: Number(req.price) || 0,
+            totalAmount: salePrice,
             paidAmount: 0,
-            remainingAmount: Number(req.price) || 0,
+            remainingAmount: salePrice,
             dueDate: debtDueDate,
             notes: `دين على الوكيل (${agentName}) والزبون (${req.customerName}) - ${req.subscriptionType}`,
             status: 'غير مسدد',
@@ -1159,6 +1175,8 @@
           updatedSubscribers[subIdx].status = 'فعال';
           updatedSubscribers[subIdx].owner = agentName;
           updatedSubscribers[subIdx].agentName = agentName;
+          updatedSubscribers[subIdx].agentCode = req.agentCode || updatedSubscribers[subIdx].agentCode || '';
+          updatedSubscribers[subIdx].submittedBy = req.submittedBy || updatedSubscribers[subIdx].submittedBy || '';
           if (!updatedSubscribers[subIdx].joiningDate) {
             updatedSubscribers[subIdx].joiningDate = startDate;
           }
@@ -1170,6 +1188,8 @@
             deviceNumber: req.deviceNumber,
             owner: agentName,
             agentName: agentName,
+            agentCode: req.agentCode || '',
+            submittedBy: req.submittedBy || '',
             joiningDate: startDate,
             activationDate: startDate,
             expiryDate: endDate,
@@ -1191,21 +1211,293 @@
         navigateTo(currentPage);
       } catch (err) {
         console.error(err);
+        if (btnEl) btnEl.disabled = false;
         showToast('حدث خطأ أثناء المعالجة', 'error');
       }
     });
   };
 
-  window.rejectSubmission = async function(subId) {
-    showConfirmDialog('رفض الطلب', 'هل أنت متأكد من رفض هذا الطلب؟', async () => {
-      const data = getData();
-      const subs = data.agentSubmissions || [];
-      const req = subs.find(s => s.id === subId);
-      if (req && typeof getEngine().deleteFirestoreSubmission === 'function') {
-        await getEngine().deleteFirestoreSubmission(req.submittedBy, req.id);
+  // --- Flexible Rejection Financial Routing Modal ---
+  window.openRejectModal = function(subId) {
+    const data = getData();
+    const subs = data.agentSubmissions || [];
+    const req = subs.find(s => s.id === subId);
+    if (!req) {
+      showToast('الطلب غير موجود في المعلقات', 'error');
+      return;
+    }
+
+    const agentName = window.resolveAgentName ? window.resolveAgentName(req) : (req.agentName || req.seller || 'الوكيل');
+    const isNewDevice = req.saleType === 'جهاز جديد' || req.subscriptionType === 'جهاز جديد';
+
+    let salePrice = Number(req.price) || 0;
+    if (salePrice <= 0) {
+      const agPricing = window.getAgentPricing ? window.getAgentPricing(agentName) : {};
+      salePrice = isNewDevice ? (agPricing.device || 45000) : (agPricing.sub1 || 18000);
+    }
+
+    const modalContainer = document.getElementById('modal-container');
+    modalContainer.innerHTML = `
+      <div class="modal-overlay active" onclick="if (event.target === this) closeModal()">
+        <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 540px;">
+          <div class="modal-header" style="background: var(--danger-bg); border-bottom: 2px solid var(--danger);">
+            <h3 style="color: var(--danger); display: flex; align-items: center; gap: 8px;">
+              <span>✕</span>
+              <span>خيارات رفض الطلب والتوجيه المالي</span>
+            </h3>
+            <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+          </div>
+          <form id="reject-routing-form">
+            <div class="modal-body">
+              <!-- Summary Box -->
+              <div style="background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.82rem; color: var(--muted);">الوكيل المسؤول:</span>
+                  <strong style="color: var(--ink);">${escapeHtml(agentName)}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.82rem; color: var(--muted);">الزبون والجهاز:</span>
+                  <strong>${escapeHtml(req.customerName)} (${escapeHtml(req.deviceNumber)})</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 0.82rem; color: var(--muted);">نوع العملية والقيمة:</span>
+                  <strong style="color: var(--danger);">${escapeHtml(req.subscriptionType || req.saleType || 'تجديد')} | ${formatIQD(salePrice)}</strong>
+                </div>
+              </div>
+
+              <!-- Routing Selector -->
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label style="font-weight: 700; margin-bottom: 8px; display: block; color: var(--ink);">
+                  حدد الإجراء والتوجيه المالي المطلوب للرفض *
+                </label>
+
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                  <!-- Option 1: None -->
+                  <label class="routing-option-card" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s ease;">
+                    <input type="radio" name="rejectionRouting" value="none" checked style="margin-top: 3px;">
+                    <div>
+                      <strong style="display: block; font-size: 0.92rem; color: var(--ink);">🚫 إلغاء عادي بدون أثر مالي (رفض وإلغاء الطلب)</strong>
+                      <span style="font-size: 0.78rem; color: var(--muted); display: block; margin-top: 2px;">يتم حذف الطلب نهائياً من قائمة المعلقات دون تسجيل ديون أو مبيعات.</span>
+                    </div>
+                  </label>
+
+                  <!-- Option 2: Debt -->
+                  <label class="routing-option-card" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s ease;">
+                    <input type="radio" name="rejectionRouting" value="debt" style="margin-top: 3px;">
+                    <div>
+                      <strong style="display: block; font-size: 0.92rem; color: var(--warning);">📝 تحويل المبلغ إلى دين على الوكيل (تسجيل دين)</strong>
+                      <span style="font-size: 0.78rem; color: var(--muted); display: block; margin-top: 2px;">يتم رفض الطلب وتسجيل دين مستحق بقيمة (${formatIQD(salePrice)}) في ذمة الوكيل.</span>
+                    </div>
+                  </label>
+
+                  <!-- Option 3: Cash -->
+                  <label class="routing-option-card" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s ease;">
+                    <input type="radio" name="rejectionRouting" value="cash" style="margin-top: 3px;">
+                    <div>
+                      <strong style="display: block; font-size: 0.92rem; color: var(--success);">💵 تحويل المبلغ إلى استلام نقدي من الوكيل (دفع نقدي)</strong>
+                      <span style="font-size: 0.78rem; color: var(--muted); display: block; margin-top: 2px;">يتم رفض الطلب وتسجيل المبلغ (${formatIQD(salePrice)}) كتحصيل نقدي مسدد من الوكيل.</span>
+                    </div>
+                  </label>
+
+                  <!-- Option 4: Direct Sale -->
+                  <label class="routing-option-card" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s ease;">
+                    <input type="radio" name="rejectionRouting" value="direct_sale" style="margin-top: 3px;">
+                    <div>
+                      <strong style="display: block; font-size: 0.92rem; color: var(--green);">📦 تحويل الطلب إلى بيع مباشر لحساب الوكيل (مبيعات للوكيل)</strong>
+                      <span style="font-size: 0.78rem; color: var(--muted); display: block; margin-top: 2px;">يتم اعتماد العملية كمبيعات مباشرة للوكيل بقيمة (${formatIQD(salePrice)}) وتحديث سجل المشترك.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Notes Input -->
+              <div class="form-group">
+                <label style="font-weight: 600; margin-bottom: 4px; display: block;">ملاحظات / سبب الرفض (اختياري)</label>
+                <input type="text" id="rejection-notes" placeholder="أدخل أي ملاحظات حول سبب الرفض والتوجيه..." style="width: 100%;">
+              </div>
+            </div>
+
+            <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+              <button type="submit" class="btn btn-danger" id="btn-submit-rejection">تأكيد الرفض والتوجيه</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('reject-routing-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById('btn-submit-rejection');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'جاري التنفيذ...';
       }
-      const updated = subs.filter(s => s.id !== subId);
-      await getEngine().commitData('agentSubmissions', updated);
+
+      const selectedRouting = document.querySelector('input[name="rejectionRouting"]:checked')?.value || 'none';
+      const notes = (document.getElementById('rejection-notes')?.value || '').trim();
+
+      try {
+        await window.processRejection(subId, selectedRouting, notes);
+        closeModal();
+      } catch (err) {
+        console.error(err);
+        showToast('حدث خطأ أثناء تنفيذ عملية الرفض', 'error');
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    };
+  };
+
+  window.processRejection = async function(subId, routingType, notes) {
+    const data = getData();
+    const subs = data.agentSubmissions || [];
+    const req = subs.find(s => s.id === subId);
+    if (!req) return;
+
+    const agentName = window.resolveAgentName ? window.resolveAgentName(req) : (req.agentName || req.seller || 'الوكيل');
+    const isNewDevice = req.saleType === 'جهاز جديد' || req.subscriptionType === 'جهاز جديد';
+
+    let salePrice = Number(req.price) || 0;
+    if (salePrice <= 0) {
+      const agPricing = window.getAgentPricing ? window.getAgentPricing(agentName) : {};
+      salePrice = isNewDevice ? (agPricing.device || 45000) : (agPricing.sub1 || 18000);
+    }
+
+    const updatedSubs = subs.filter(s => s.id !== subId);
+    const updatesToCommit = [{ collectionName: 'agentSubmissions', items: updatedSubs }];
+
+    let toastMsg = 'تم رفض الطلب وحذفه بنجاح';
+
+    if (routingType === 'debt') {
+      const newDebt = {
+        id: 'debt-' + Date.now(),
+        saleId: 'reject-' + subId,
+        saleCode: req.code || ('REJ-' + Math.floor(1000 + Math.random() * 9000)),
+        customerName: req.customerName,
+        debtor: 'الوكيل والزبون',
+        seller: agentName,
+        agentName: agentName,
+        agentCode: req.agentCode || '',
+        submittedBy: req.submittedBy || '',
+        customerPhone: req.customerPhone || '',
+        deviceNumber: req.deviceNumber,
+        totalAmount: salePrice,
+        paidAmount: 0,
+        remainingAmount: salePrice,
+        dueDate: new Date().toISOString().substring(0, 10),
+        notes: notes ? `طلب مرفوض (تسجيل دين على الوكيل) - ${notes}` : `دين مستحق على الوكيل (${agentName}) بطلب مرفوض - ${req.customerName}`,
+        status: 'غير مسدد',
+        createdAt: new Date().toISOString().substring(0, 10)
+      };
+      const updatedDebts = [newDebt, ...(data.debts || [])];
+      updatesToCommit.push({ collectionName: 'debts', items: updatedDebts });
+      toastMsg = `تم رفض الطلب وتسجيل دين بقيمة (${formatIQD(salePrice)}) على الوكيل (${agentName})`;
+
+    } else if (routingType === 'cash') {
+      const newCashSale = {
+        id: 'sale-rej-' + Date.now(),
+        code: req.code || generateSaleCode(),
+        customerName: req.customerName,
+        customerPhone: req.customerPhone || '',
+        seller: agentName,
+        agentName: agentName,
+        agentCode: req.agentCode || '',
+        submittedBy: req.submittedBy || '',
+        saleType: req.saleType || 'تحصيل نقدي - طلب مرفوض',
+        deviceNumber: req.deviceNumber,
+        subscriptionType: req.subscriptionType || 'تحصيل نقدي',
+        startDate: req.startDate || new Date().toISOString().substring(0, 10),
+        endDate: req.endDate || new Date().toISOString().substring(0, 10),
+        price: salePrice,
+        paymentStatus: 'نقد',
+        paymentMethod: 'نقد',
+        agentPaid: salePrice,
+        approvalStatus: 'معتمدة - استلام نقدي',
+        notes: notes ? `طلب مرفوض (تحصيل نقدي) - ${notes}` : `تحصيل نقدي من الوكيل (${agentName}) مقابل طلب مرفوض`,
+        createdAt: new Date().toISOString()
+      };
+      const updatedSales = [newCashSale, ...(data.sales || [])];
+      updatesToCommit.push({ collectionName: 'sales', items: updatedSales });
+      toastMsg = `تم رفض الطلب وتسجيل تحصيل نقدي بقيمة (${formatIQD(salePrice)}) من الوكيل (${agentName})`;
+
+    } else if (routingType === 'direct_sale') {
+      const startDate = req.startDate || new Date().toISOString().substring(0, 10);
+      let endDate = req.endDate;
+      if (!endDate || endDate === '-') {
+        endDate = window.addMonthsToDate ? window.addMonthsToDate(startDate, 1) : startDate;
+      }
+
+      const newDirectSale = {
+        id: 'sale-dir-' + Date.now(),
+        code: req.code || generateSaleCode(),
+        customerName: req.customerName,
+        customerPhone: req.customerPhone || '',
+        seller: agentName,
+        agentName: agentName,
+        agentCode: req.agentCode || '',
+        submittedBy: req.submittedBy || '',
+        saleType: req.saleType || 'مبيعات للوكيل',
+        deviceNumber: req.deviceNumber,
+        subscriptionType: req.subscriptionType || 'اشتراك شهر واحد',
+        startDate: startDate,
+        endDate: endDate,
+        price: salePrice,
+        paymentStatus: 'تم التسديد',
+        paymentMethod: 'نقد',
+        agentPaid: salePrice,
+        approvalStatus: 'معتمدة - مبيعات للوكيل',
+        notes: notes ? `تحويل إلى بيع مباشر - ${notes}` : `تحويل طلب إلى بيع مباشر لحساب الوكيل (${agentName})`,
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedSales = [newDirectSale, ...(data.sales || [])];
+      updatesToCommit.push({ collectionName: 'sales', items: updatedSales });
+
+      let updatedSubscribers = data.subscribers || [];
+      const subIdx = updatedSubscribers.findIndex(s => s.deviceNumber === req.deviceNumber);
+      if (subIdx >= 0) {
+        updatedSubscribers[subIdx].name = req.customerName;
+        if (req.customerPhone) updatedSubscribers[subIdx].phone = req.customerPhone;
+        updatedSubscribers[subIdx].expiryDate = endDate;
+        updatedSubscribers[subIdx].status = 'فعال';
+        updatedSubscribers[subIdx].owner = agentName;
+        updatedSubscribers[subIdx].agentName = agentName;
+      } else {
+        updatedSubscribers.push({
+          id: 'sub-' + Date.now(),
+          name: req.customerName,
+          phone: req.customerPhone || '',
+          deviceNumber: req.deviceNumber,
+          owner: agentName,
+          agentName: agentName,
+          agentCode: req.agentCode || '',
+          submittedBy: req.submittedBy || '',
+          joiningDate: startDate,
+          activationDate: startDate,
+          expiryDate: endDate,
+          status: 'فعال'
+        });
+      }
+      updatesToCommit.push({ collectionName: 'subscribers', items: updatedSubscribers });
+      toastMsg = `تم رفض الطلب وتحويله إلى بيع مباشر معتمد للوكيل (${agentName})`;
+    }
+
+    // Atomically commit all changes across local and central Firestore
+    await getEngine().batchCommitData(updatesToCommit);
+
+    if (typeof getEngine().deleteFirestoreSubmission === 'function') {
+      await getEngine().deleteFirestoreSubmission(req.submittedBy, req.id);
+    } else if (typeof getEngine().deleteItem === 'function') {
+      await getEngine().deleteItem('agentSubmissions', req.id);
+    }
+
+    showToast(toastMsg, 'info');
+    navigateTo(currentPage);
+  };
+
+  window.rejectSubmission = async function(subId) {
+    window.openRejectModal(subId);
+  };
       showToast('تم رفض الطلب وحذفه', 'info');
       navigateTo(currentPage);
     });
@@ -1632,9 +1924,12 @@
 
         await getEngine().commitData('sales', updatedSales);
         showToast('تم تسجيل الفاتورة بنجاح', 'success');
+      } catch (err) {
+        console.error('Error saving sale:', err);
+        showToast('حدث خطأ أثناء تسجيل الفاتورة', 'error');
+      } finally {
+        closeModal();
       }
-
-      closeModal();
     };
   };
 

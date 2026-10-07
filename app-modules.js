@@ -381,6 +381,8 @@
           existing.username = username;
           existing.password = password;
 
+          const batchUpdates = [];
+
           // Propagate agent name change across all collections dynamically
           if (oldName && oldName !== newName) {
             // 1. Sales
@@ -391,7 +393,7 @@
                   s.agentName = newName;
                 }
               });
-              await getEngine().commitData('sales', data.sales);
+              batchUpdates.push({ collectionName: 'sales', items: data.sales });
             }
 
             // 2. Debts
@@ -402,7 +404,7 @@
                   d.agentName = newName;
                 }
               });
-              await getEngine().commitData('debts', data.debts);
+              batchUpdates.push({ collectionName: 'debts', items: data.debts });
             }
 
             // 3. Subscribers
@@ -413,7 +415,7 @@
                   sub.seller = newName;
                 }
               });
-              await getEngine().commitData('subscribers', data.subscribers);
+              batchUpdates.push({ collectionName: 'subscribers', items: data.subscribers });
             }
 
             // 4. Agent Settlements
@@ -423,7 +425,7 @@
                   st.agentName = newName;
                 }
               });
-              await getEngine().commitData('agentSettlements', data.agentSettlements);
+              batchUpdates.push({ collectionName: 'agentSettlements', items: data.agentSettlements });
             }
 
             // 5. Users
@@ -436,7 +438,7 @@
                   }
                 }
               });
-              await getEngine().commitData('users', data.users);
+              batchUpdates.push({ collectionName: 'users', items: data.users });
             }
           }
 
@@ -445,12 +447,17 @@
           if (curPricing.agentPrices && curPricing.agentPrices[agentId]) {
             curPricing.agentPrices[agentId].agentName = newName;
             curPricing.agentPrices[agentId].agentCode = code;
-            await getEngine().commitData('pricing', curPricing);
+            batchUpdates.push({ collectionName: 'pricing', items: curPricing });
           }
 
-          await getEngine().commitData('agents', agents);
-          await getEngine().saveAgentCredentials(agentId, username, password, { name, code, phone, price });
-          window.showToast('تم تحديث وحفظ بيانات وحساب الوكيل في القاعدة المركزية بنجاح', 'success');
+          batchUpdates.push({ collectionName: 'agents', items: agents });
+          await getEngine().batchCommitData(batchUpdates);
+          try {
+            await getEngine().saveAgentCredentials(agentId, username, password, { name, code, phone, price });
+          } catch(e) {
+            console.warn('Agent credentials save note:', e);
+          }
+          window.showToast('تم تحديث وحفظ بيانات وحساب الوكيل بنجاح', 'success');
         } else {
           // Check for duplicate agent code
           if ((data.agents || []).some(a => a.code === code)) {
@@ -469,8 +476,8 @@
             password, 
             createdAt: new Date().toISOString() 
           };
-          await getEngine().commitData('agents', [newAg, ...agents]);
-          await getEngine().saveAgentCredentials(newAg.id, username, password);
+          const updatedAgents = [newAg, ...agents];
+          const batchUpdates = [{ collectionName: 'agents', items: updatedAgents }];
 
           // Auto-add new agent into pricing table with default editable prices
           const curPricing = data.pricing || {};
@@ -492,25 +499,28 @@
             status: 'معتمدة'
           };
           curPricing.agentPrices = agentPrices;
-          await getEngine().commitData('pricing', curPricing);
+          batchUpdates.push({ collectionName: 'pricing', items: curPricing });
+
+          await getEngine().batchCommitData(batchUpdates);
+          try {
+            await getEngine().saveAgentCredentials(newAg.id, username, password);
+          } catch(e) {
+            console.warn('Agent credentials save note:', e);
+          }
 
           window.showToast('تم إضافة الوكيل وحساب الدخول وإدراجه في جدول الأسعار بنجاح', 'success');
         }
-
-        // Operation executed successfully: Immediately close/dismiss the modal and reset state
+      } catch (err) {
+        console.error('Error saving agent:', err);
+        window.showToast('حدث خطأ أثناء حفظ بيانات الوكيل', 'error');
+      } finally {
+        // ALWAYS DISMISS MODAL IMMEDIATELY
         window.closeModal();
 
         // Refresh agent table if view is active
         if (typeof window.renderAgents === 'function') {
           const mainEl = document.getElementById('main-content');
           if (mainEl) window.renderAgents(mainEl);
-        }
-      } catch (err) {
-        console.error('Error saving agent:', err);
-        window.showToast('حدث خطأ أثناء حفظ بيانات الوكيل في القاعدة المركزية', 'error');
-        if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'حفظ الوكيل';
         }
       }
     };
@@ -574,15 +584,15 @@
         }
 
         await getEngine().saveAgentCredentials(ag.id, u, p, { name: ag.name, code: ag.code, phone: ag.phone, price: ag.price });
-        window.showToast(`تم حفظ وتثبيت حساب الوكيل ${ag.name} وكلمة المرور في القاعدة المركزية بنجاح`, 'success');
+        window.showToast(`تم حفظ وتثبيت حساب الوكيل ${ag.name} وكلمة المرور بنجاح`, 'success');
+      } catch (err) {
+        console.error('Error saving credentials:', err);
+        window.showToast('حدث خطأ أثناء حفظ بيانات الدخول', 'error');
+      } finally {
         window.closeModal();
         if (typeof window.renderAgents === 'function') {
           window.renderAgents(document.getElementById('main-content'));
         }
-      } catch (err) {
-        console.error('Error saving credentials:', err);
-        window.showToast('حدث خطأ أثناء حفظ بيانات الدخول', 'error');
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'حفظ وتحديث الرمز السري'; }
       }
     };
   };
@@ -744,10 +754,18 @@
       const sales = [newSale, ...(data.sales || [])];
       const debts = [newDebt, ...(data.debts || [])];
 
-      await getEngine().commitData('sales', sales);
-      await getEngine().commitData('debts', debts);
-      window.showToast(`تم إصدار فاتورة الوكيل ${agentName} بنجاح`, 'success');
-      window.closeModal();
+      try {
+        await getEngine().batchCommitData([
+          { collectionName: 'sales', items: sales },
+          { collectionName: 'debts', items: debts }
+        ]);
+        window.showToast(`تم إصدار فاتورة الوكيل ${agentName} بنجاح`, 'success');
+      } catch (err) {
+        console.error('Error in agent invoice:', err);
+        window.showToast('حدث خطأ أثناء إصدار الفاتورة', 'error');
+      } finally {
+        window.closeModal();
+      }
     };
   };
 
@@ -870,12 +888,19 @@
 
       const allSettlements = [settlementRecord, ...(data.agentSettlements || [])];
 
-      await getEngine().commitData('debts', updatedDebts);
-      await getEngine().commitData('sales', allSales);
-      await getEngine().commitData('agentSettlements', allSettlements);
-
-      window.showToast(`تم تسجيل تسديد ديون ${agentName} بنجاح`, 'success');
-      window.closeModal();
+      try {
+        await getEngine().batchCommitData([
+          { collectionName: 'debts', items: updatedDebts },
+          { collectionName: 'sales', items: allSales },
+          { collectionName: 'agentSettlements', items: allSettlements }
+        ]);
+        window.showToast(`تم تسجيل تسديد ديون ${agentName} بنجاح`, 'success');
+      } catch (err) {
+        console.error('Error settling debt:', err);
+        window.showToast('حدث خطأ أثناء تسجيل التسديد', 'error');
+      } finally {
+        window.closeModal();
+      }
     };
   };
 

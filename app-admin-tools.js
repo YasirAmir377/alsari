@@ -1455,16 +1455,37 @@
     }
   };
 
+  window.isAgentRecord = function(record, user) {
+    if (!record || !user) return false;
+    const agentName = user.agentName || user.displayName || '';
+    const agentCode = user.agentCode || '';
+    const uid = user.uid || '';
+    const username = (user.username || '').toLowerCase();
+
+    if (record.submittedBy && uid && record.submittedBy === uid) return true;
+    if (record.agentCode && agentCode && record.agentCode === agentCode) return true;
+    if (record.seller && (record.seller === agentName || (username && record.seller.toLowerCase() === username))) return true;
+    if (record.agentName && (record.agentName === agentName || (username && record.agentName.toLowerCase() === username))) return true;
+    if (record.owner && (record.owner === agentName || record.owner === agentCode || (username && record.owner.toLowerCase() === username))) return true;
+
+    if (window.resolveAgentName) {
+      const resolved = window.resolveAgentName(record);
+      if (resolved && agentName && resolved === agentName) return true;
+    }
+
+    return false;
+  };
+
   window.renderAgentDashboard = function(container) {
     const user = getEngine().currentUser;
     const data = getData();
     const agentName = user.agentName || user.displayName;
     const today = new Date().toISOString().substring(0, 10);
 
-    const allMySales = (data.sales || []).filter(s => s.seller === agentName || s.agentName === agentName);
-    const myDebts = (data.debts || []).filter(d => (d.seller === agentName || (d.customerName && d.customerName.includes(agentName))) && d.remainingAmount > 0);
-    const mySubmissions = (data.agentSubmissions || []).filter(s => s.seller === agentName || s.agentName === agentName || s.submittedBy === user.uid);
-    const allMySubscribers = (data.subscribers || []).filter(s => s.owner === agentName || s.owner === user.displayName || s.owner === user.agentCode);
+    const allMySales = (data.sales || []).filter(s => window.isAgentRecord(s, user));
+    const myDebts = (data.debts || []).filter(d => window.isAgentRecord(d, user) && d.remainingAmount > 0);
+    const mySubmissions = (data.agentSubmissions || []).filter(s => window.isAgentRecord(s, user));
+    const allMySubscribers = (data.subscribers || []).filter(s => window.isAgentRecord(s, user));
 
     // Apply agent filters
     let filteredSales = allMySales.map(s => {
@@ -1960,17 +1981,22 @@
         }
       }
 
-      await window.submitAgentSale({
-        customerName,
-        customerPhone,
-        deviceNumber,
-        subscriptionType,
-        saleType: type,
-        price,
-        startDate,
-        endDate
-      });
-      window.closeModal();
+      try {
+        await window.submitAgentSale({
+          customerName,
+          customerPhone,
+          deviceNumber,
+          subscriptionType,
+          saleType: type,
+          price,
+          startDate,
+          endDate
+        });
+      } catch (err) {
+        console.error('Error submitting agent sale:', err);
+      } finally {
+        window.closeModal();
+      }
     };
   };
 

@@ -706,18 +706,26 @@
       return;
     }
 
+    const user = window.syncEngine?.currentUser;
+    const agName = user?.agentName || user?.displayName || subscriber.owner || subscriber.agentName || 'وكيل';
+    const agCode = user?.agentCode || subscriber.agentCode || '';
+
     const renewalRequest = {
       id: 'sub-req-' + Date.now(),
       customerName: subscriber.name,
-      customerPhone: subscriber.phone,
+      customerPhone: subscriber.phone || '',
       deviceNumber: subscriber.deviceNumber,
       subscriptionType: 'تجديد اشتراك',
-      price: 0, // Admin to set price
-      startDate: subscriber.expiryDate, // Assume starts on expiry
+      saleType: 'تجديد اشتراك',
+      price: 0, // Admin/pricing fallback to set price
+      startDate: subscriber.expiryDate || new Date().toISOString().substring(0, 10),
       endDate: '-', // Admin to set end date
+      status: 'Pending',
       approvalStatus: 'قيد الاعتماد',
-      submittedBy: window.syncEngine?.currentUser?.uid || 'agent',
-      agentName: subscriber.owner,
+      submittedBy: user?.uid || 'agent',
+      agentName: agName,
+      seller: agName,
+      agentCode: agCode,
       createdAt: new Date().toISOString()
     };
 
@@ -822,15 +830,15 @@
 
         await getEngine().commitData('subscribers', subs);
         window.showToast('تم حفظ المشترك بنجاح', 'success');
+      } catch (err) {
+        console.error('Error saving subscriber:', err);
+        window.showToast('حدث خطأ أثناء حفظ بيانات المشترك', 'error');
+      } finally {
         window.closeModal();
         if (typeof window.renderSubscribers === 'function') {
           const mainEl = document.getElementById('main-content');
           if (mainEl) window.renderSubscribers(mainEl);
         }
-      } catch (err) {
-        console.error('Error saving subscriber:', err);
-        window.showToast('حدث خطأ أثناء حفظ بيانات المشترك', 'error');
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'حفظ المشترك'; }
       }
     };
   };
