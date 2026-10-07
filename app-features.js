@@ -85,7 +85,7 @@
           </div>
         </div>
 
-        <div class="content-card">
+        <div class="content-card" style="max-width: 1100px; margin: 0 auto;">
           <div class="filters-bar">
             <div class="filter-chips">
               <span class="chip ${debtFilterSeller === 'all' ? 'active' : ''}" onclick="setDebtFilter('all')">كافة الجهات</span>
@@ -97,7 +97,7 @@
           </div>
 
           <div class="table-responsive">
-            <table class="data-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>المدين / الفاتورة</th>

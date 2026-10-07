@@ -758,6 +758,12 @@ table.data-table td {
   font-size: 0.79rem;
 }
 
+table.data-table.compact-table th,
+table.data-table.compact-table td {
+  padding: 4px 6px;
+  font-size: 0.74rem;
+}
+
 /* Compact cell helpers for stacked, space-saving layouts */
 .cell-title {
   font-weight: 700;
