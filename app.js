@@ -13,7 +13,21 @@
   }
 
   function getData() {
-    return getEngine() ? getEngine().data : {};
+    const engine = getEngine();
+    const d = engine ? (engine.data || {}) : {};
+    return {
+      agents: Array.isArray(d.agents) ? d.agents : [],
+      sales: Array.isArray(d.sales) ? d.sales : [],
+      debts: Array.isArray(d.debts) ? d.debts : [],
+      subscribers: Array.isArray(d.subscribers) ? d.subscribers : [],
+      codes: Array.isArray(d.codes) ? d.codes : [],
+      pricing: d.pricing || window.DEFAULT_PRICING || {},
+      templates: d.templates || { whatsapp: window.DEFAULT_WHATSAPP_TEMPLATE },
+      users: Array.isArray(d.users) ? d.users : [],
+      agentSubmissions: Array.isArray(d.agentSubmissions) ? d.agentSubmissions : [],
+      agentSettlements: Array.isArray(d.agentSettlements) ? d.agentSettlements : [],
+      products: Array.isArray(d.products) ? d.products : window.DEFAULT_PRODUCTS || []
+    };
   }
 
   function escapeHtml(str) {
@@ -295,10 +309,27 @@
     }
   };
 
-  window.quickFillLogin = function(user, pass) {
-    document.getElementById('login-username').value = user;
-    document.getElementById('login-password').value = pass;
-    document.getElementById('login-form').dispatchEvent(new Event('submit'));
+  window.quickFillLogin = async function(user, pass) {
+    const usernameInput = document.getElementById('login-username');
+    const passwordInput = document.getElementById('login-password');
+    const errEl = document.getElementById('login-error');
+    if (usernameInput) usernameInput.value = user;
+    if (passwordInput) passwordInput.value = pass;
+    if (errEl) errEl.style.display = 'none';
+
+    try {
+      const res = await getEngine().login(user, pass);
+      if (res && res.user) {
+        showToast(`أهلاً بك، ${res.user.displayName || res.user.username}!`, 'success');
+        renderAppView(res.user);
+      }
+    } catch (err) {
+      console.error('Quick login error:', err);
+      if (errEl) {
+        errEl.textContent = err.message || 'خطأ في تسجيل الدخول.';
+        errEl.style.display = 'block';
+      }
+    }
   };
 
   // --- Global Event Listeners ---
