@@ -315,7 +315,12 @@
         const username = document.getElementById('login-username').value;
         const password = document.getElementById('login-password').value;
         const errEl = document.getElementById('login-error');
-        errEl.style.display = 'none';
+        const submitBtn = loginForm.querySelector('button[type="submit"]');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'جاري تسجيل الدخول...';
+        }
+        if (errEl) errEl.style.display = 'none';
 
         try {
           const res = await getEngine().login(username, password);
@@ -324,8 +329,15 @@
             renderAppView(res.user);
           }
         } catch (err) {
-          errEl.textContent = err.message || 'اسم الحساب أو كلمة المرور غير صحيحة.';
-          errEl.style.display = 'block';
+          if (errEl) {
+            errEl.textContent = err.message || 'اسم الحساب أو كلمة المرور غير صحيحة.';
+            errEl.style.display = 'block';
+          }
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'تسجيل الدخول';
+          }
         }
       });
     }
